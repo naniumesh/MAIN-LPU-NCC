@@ -136,6 +136,7 @@ app.delete("/api/registrations/:id", async (req, res) => {
 });
 
 // -------------------- Routes: News --------------------
+
 // Get all news
 app.get("/api/news", async (req, res) => {
     try {
@@ -146,53 +147,64 @@ app.get("/api/news", async (req, res) => {
     }
 });
 
-// Add news
+// Add a news item
 app.post("/api/news", async (req, res) => {
-    const { text, url } = req.body;
     try {
+        const { text, url } = req.body;
+        if (!text || !url) {
+            return res.status(400).json({ message: "Text and URL are required." });
+        }
+
         const newNews = new News({ text, url });
         await newNews.save();
-        res.status(201).json(newNews);
+        res.status(201).json({ message: "News item added", news: newNews });
     } catch (error) {
         res.status(500).json({ message: "Error adding news", error });
     }
 });
 
-// Full update
-app.put("/api/news/:id", async (req, res) => {
-    const { text, url } = req.body;
+// Update a news item
+app.patch("/api/news/:id", async (req, res) => {
     try {
+        const { id } = req.params;
+        const { text, url } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid news ID" });
+        }
+
         const updatedNews = await News.findByIdAndUpdate(
-            req.params.id,
+            id,
             { text, url },
             { new: true }
         );
-        res.json(updatedNews);
+
+        if (!updatedNews) {
+            return res.status(404).json({ message: "News item not found" });
+        }
+
+        res.json({ message: "News updated", news: updatedNews });
     } catch (error) {
         res.status(500).json({ message: "Error updating news", error });
     }
 });
 
-// Partial update
-app.patch("/api/news/:id", async (req, res) => {
-    const updates = req.body;
-    try {
-        const updatedNews = await News.findByIdAndUpdate(
-            req.params.id,
-            updates,
-            { new: true }
-        );
-        res.json(updatedNews);
-    } catch (error) {
-        res.status(500).json({ message: "Error patching news", error });
-    }
-});
-
-// Delete news
+// Delete a news item
 app.delete("/api/news/:id", async (req, res) => {
     try {
-        const deletedNews = await News.findByIdAndDelete(req.params.id);
-        res.json({ message: "News deleted", deletedNews });
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid news ID" });
+        }
+
+        const deletedNews = await News.findByIdAndDelete(id);
+
+        if (!deletedNews) {
+            return res.status(404).json({ message: "News item not found" });
+        }
+
+        res.json({ message: "News item deleted" });
     } catch (error) {
         res.status(500).json({ message: "Error deleting news", error });
     }
@@ -200,5 +212,5 @@ app.delete("/api/news/:id", async (req, res) => {
 
 // -------------------- Start Server --------------------
 app.listen(PORT, () => {
-    console.log(`✅ Unified Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
