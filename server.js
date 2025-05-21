@@ -1,211 +1,216 @@
-// Load environment variables from .env file
 require("dotenv").config();
-
 const express = require("express");
 const mongoose = require("mongoose");
-const multer = require("multer");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const path = require("path");
-const bcrypt = require("bcrypt");
 
 const app = express();
-
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-app.use(express.static(path.join(__dirname, "public"))); // Serve frontend
-
-// Connect to Registration DB
-const regDb = mongoose.createConnection(process.env.MONGO_REG_URL, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-regDb.on("connected", () => console.log("✅ Registration DB connected"));
-regDb.on("error", err => console.error("❌ Registration DB error:", err));
-
-// Connect to Login DB
-const loginDb = mongoose.createConnection(process.env.MONGO_LOGIN_URL, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-loginDb.on("connected", () => console.log("✅ Login DB connected"));
-loginDb.on("error", err => console.error("❌ Login DB error:", err));
-
-// Models for Registration System
-const Registration = regDb.model("Registration", new mongoose.Schema({
-  rank: String,
-  fullname: String,
-  year: String,
-  enroll: String,
-  regnum: String,
-  battalion: String,
-  camp: String,
-  sd: String,
-  image: String,
-}));
-
-const Setting = regDb.model("Setting", new mongoose.Schema({
-  registrationEnabled: Boolean,
-}));
-
-const CampData = regDb.model("CampData", new mongoose.Schema({
-  battalion: String,
-  camp: String,
-}));
-
-// Model for Login System
-const LoginUser = loginDb.model("LoginUser", new mongoose.Schema({
-  username: String,
-  password: String, // hashed
-}));
-
-// Default route to load registration page
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "register.html"));
-});
-
-// ------------------- LOGIN SYSTEM -------------------
-
-// Login
-app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
-  const user = await LoginUser.findOne({ username });
-
-  if (!user) return res.status(401).json({ success: false, message: "User not found." });
-
-  const match = await bcrypt.compare(password, user.password);
-  if (match) {
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false, message: "Invalid password." });
-  }
-});
-
-// Add User
-app.post("/api/add-user", async (req, res) => {
-  const { username, password } = req.body;
-
-  const exists = await LoginUser.findOne({ username });
-  if (exists) return res.status(409).json({ message: "User already exists" });
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  await LoginUser.create({ username, password: hashedPassword });
-
-  res.json({ success: true });
-});
-
-// Get All Users
-app.get("/api/users", async (req, res) => {
-  const users = await LoginUser.find({}, { password: 0 });
-  res.json(users);
-});
-
-// Remove User
-app.delete("/api/users/:username", async (req, res) => {
-  const result = await LoginUser.deleteOne({ username: req.params.username });
-  if (result.deletedCount > 0) {
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ message: "User not found" });
-  }
-});
-
-// ------------------- REGISTRATION SYSTEM -------------------
-
-// Multer setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads"),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
-});
-const upload = multer({ storage });
-
-// Registration Settings
-app.get("/api/settings", async (req, res) => {
-  let setting = await Setting.findOne();
-  if (!setting) {
-    setting = new Setting({ registrationEnabled: true });
-    await setting.save();
-  }
-  res.json(setting);
-});
-
-app.post("/api/settings", async (req, res) => {
-  let setting = await Setting.findOne();
-  if (!setting) {
-    setting = new Setting(req.body);
-  } else {
-    setting.registrationEnabled = req.body.registrationEnabled;
-  }
-  await setting.save();
-  res.sendStatus(200);
-});
-
-// Camps
-app.get("/api/camps", async (req, res) => {
-  const camps = await CampData.find();
-  const grouped = {};
-  camps.forEach(({ battalion, camp }) => {
-    if (!grouped[battalion]) grouped[battalion] = [];
-    grouped[battalion].push(camp);
-  });
-  res.json(grouped);
-});
-
-app.post("/api/camps", async (req, res) => {
-  const { battalion, camp } = req.body;
-  const exists = await CampData.findOne({ battalion, camp });
-  if (!exists) {
-    await CampData.create({ battalion, camp });
-    res.json({ success: true });
-  } else {
-    res.status(409).json({ message: "Camp already exists." });
-  }
-});
-
-app.delete("/api/camps", async (req, res) => {
-  const { battalion, camp } = req.body;
-  const result = await CampData.deleteOne({ battalion, camp });
-  if (result.deletedCount > 0) {
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ message: "Camp not found." });
-  }
-});
-
-// Registrations
-app.post("/api/register", upload.single("image"), async (req, res) => {
-  try {
-    const {
-      rank, fullname, year, enroll,
-      regnum, battalion, camp, sd
-    } = req.body;
-
-    const newReg = new Registration({
-      rank, fullname, year, enroll,
-      regnum, battalion, camp, sd,
-      image: req.file ? req.file.path : "",
-    });
-
-    const saved = await newReg.save();
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get("/api/registrations", async (req, res) => {
-  const data = await Registration.find();
-  res.json(data);
-});
-
-app.delete("/api/registrations/:id", async (req, res) => {
-  await Registration.findByIdAndDelete(req.params.id);
-  res.sendStatus(200);
-});
-
-// ------------------- START SERVER -------------------
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+
+// -------------------- Middleware --------------------
+app.use(cors());
+app.use(express.json());
+app.use(bodyParser.json());
+
+// Serve static files
+app.use(express.static(path.join(__dirname, "public")));
+
+// -------------------- MongoDB Connections --------------------
+// Registration DB
+const registrationConnection = mongoose.createConnection(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+});
+
+// News DB
+const newsConnection = mongoose.createConnection('mongodb+srv://NEWS:2121@newsdata.jqekrq2.mongodb.net/?retryWrites=true&w=majority&appName=NEWSDATA', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+});
+
+// -------------------- Registration Models --------------------
+const RegistrationSchema = new mongoose.Schema({
+    firstName: String,
+    middleName: String,
+    lastName: String,
+    gender: String,
+    regNumber: String,
+    mobile: String,
+    email: String
+});
+const Registration = registrationConnection.model("Registration", RegistrationSchema);
+
+const EnrollmentSchema = new mongoose.Schema({
+    enabled: Boolean
+});
+const Enrollment = registrationConnection.model("Enrollment", EnrollmentSchema);
+
+// -------------------- News Model --------------------
+const NewsSchema = new mongoose.Schema({
+    text: String,
+    url: String,
+    date: { type: Date, default: Date.now }
+});
+const News = newsConnection.model("News", NewsSchema);
+
+// -------------------- Routes: Registration --------------------
+// Get enrollment status
+app.get("/api/enrollment", async (req, res) => {
+    try {
+        let enrollment = await Enrollment.findOne();
+        if (!enrollment) {
+            enrollment = new Enrollment({ enabled: true });
+            await enrollment.save();
+        }
+        res.json({ enabled: enrollment.enabled });
+    } catch (error) {
+        console.error("Error fetching enrollment status:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Toggle enrollment status
+app.post("/api/enrollment", async (req, res) => {
+    try {
+        let enrollment = await Enrollment.findOne();
+        if (!enrollment) {
+            enrollment = new Enrollment({ enabled: req.body.enabled });
+        } else {
+            enrollment.enabled = req.body.enabled;
+        }
+        await enrollment.save();
+        res.json({ message: "Enrollment status updated", enabled: enrollment.enabled });
+    } catch (error) {
+        console.error("Error updating enrollment status:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Get all registrations
+app.get("/api/registrations", async (req, res) => {
+    try {
+        const registrations = await Registration.find();
+        res.json(registrations);
+    } catch (error) {
+        console.error("Error fetching registrations:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Add a new registration
+app.post("/api/register", async (req, res) => {
+    try {
+        const enrollment = await Enrollment.findOne();
+        if (!enrollment || !enrollment.enabled) {
+            return res.status(403).json({ message: "Enrollment is currently closed." });
+        }
+
+        const newRegistration = new Registration(req.body);
+        await newRegistration.save();
+        res.json({ message: "Registration successful" });
+    } catch (error) {
+        console.error("Error saving registration:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Delete a registration
+app.delete("/api/registrations/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid registration ID" });
+        }
+
+        const deletedRegistration = await Registration.findByIdAndDelete(id);
+        if (!deletedRegistration) {
+            return res.status(404).json({ message: "Registration not found" });
+        }
+
+        res.json({ message: "Registration deleted successfully" });
+    } catch (error) {
+        console.error("Error deleting registration:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// -------------------- Routes: News --------------------
+
+// Get all news
+app.get("/api/news", async (req, res) => {
+    try {
+        const newsItems = await News.find().sort({ date: -1 });
+        res.json(newsItems);
+    } catch (error) {
+        res.status(500).json({ message: "Error fetching news", error });
+    }
+});
+
+// Add a news item
+app.post("/api/news", async (req, res) => {
+    try {
+        const { text, url } = req.body;
+        if (!text || !url) {
+            return res.status(400).json({ message: "Text and URL are required." });
+        }
+
+        const newNews = new News({ text, url });
+        await newNews.save();
+        res.status(201).json({ message: "News item added", news: newNews });
+    } catch (error) {
+        res.status(500).json({ message: "Error adding news", error });
+    }
+});
+
+// Update a news item
+app.patch("/api/news/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { text, url } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid news ID" });
+        }
+
+        const updatedNews = await News.findByIdAndUpdate(
+            id,
+            { text, url },
+            { new: true }
+        );
+
+        if (!updatedNews) {
+            return res.status(404).json({ message: "News item not found" });
+        }
+
+        res.json({ message: "News updated", news: updatedNews });
+    } catch (error) {
+        res.status(500).json({ message: "Error updating news", error });
+    }
+});
+
+// Delete a news item
+app.delete("/api/news/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid news ID" });
+        }
+
+        const deletedNews = await News.findByIdAndDelete(id);
+
+        if (!deletedNews) {
+            return res.status(404).json({ message: "News item not found" });
+        }
+
+        res.json({ message: "News item deleted" });
+    } catch (error) {
+        res.status(500).json({ message: "Error deleting news", error });
+    }
+});
+
+// -------------------- Start Server --------------------
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
