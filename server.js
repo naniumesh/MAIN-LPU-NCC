@@ -24,7 +24,7 @@ const registrationConnection = mongoose.createConnection(process.env.MONGO_URI, 
 });
 
 // News DB
-const newsConnection = mongoose.createConnection('mongodb+srv://NEWS:2121@newsdata.jqekrq2.mongodb.net/?retryWrites=true&w=majority&appName=NEWSDATA', {
+const newsConnection = mongoose.createConnection(process.env.MONGO_NEWS_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 });
